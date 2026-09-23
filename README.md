@@ -137,16 +137,16 @@ go run . cube -face right -bright 0.8 -out stone_side.svg dirt_render.png
 
 <table>
   <tr>
-    <th align="center">Исходник<br><code>example/dirt.png</code></th>
-    <th align="center">грань <code>top</code><br><code>dirt_top.svg</code></th>
-    <th align="center">грань <code>left</code><br><code>dirt_left.svg</code></th>
-    <th align="center">грань <code>right</code><br><code>dirt_right.svg</code></th>
+    <th align="center">Исходник<br><a href="example/dirt.png"><code>example/dirt.png</code></a></th>
+    <th align="center">грань <code>top</code><br><a href="example/dirt_top.svg"><code>dirt_top.svg</code></a></th>
+    <th align="center">грань <code>left</code><br><a href="example/dirt_left.svg"><code>dirt_left.svg</code></a></th>
+    <th align="center">грань <code>right</code><br><a href="example/dirt_right.svg"><code>dirt_right.svg</code></a></th>
   </tr>
   <tr>
-    <td align="center"><img src="example/dirt.png" width="170"></td>
-    <td align="center"><img src="example/dirt_top.svg" width="128"></td>
-    <td align="center"><img src="example/dirt_left.svg" width="128"></td>
-    <td align="center"><img src="example/dirt_right.svg" width="128"></td>
+    <td align="center"><img src="example/dirt.png" width="170" alt="Исходник: изометрический рендер куба земли"></td>
+    <td align="center"><img src="example/dirt_top.svg" width="128" alt="Снятая текстура, грань top"></td>
+    <td align="center"><img src="example/dirt_left.svg" width="128" alt="Снятая текстура, грань left"></td>
+    <td align="center"><img src="example/dirt_right.svg" width="128" alt="Снятая текстура, грань right"></td>
   </tr>
 </table>
 
