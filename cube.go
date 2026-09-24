@@ -161,6 +161,70 @@ func meanLum(cells []rgb, opaque []bool) float64 {
 	return s / float64(n)
 }
 
+func processCubeInMemory(img image.Image, faceName string, n, colors, px, ss int, inset float64, unshade, mirror bool, bright float64, tol int) (string, error) {
+	g, isBG, err := detectCube(img, tol)
+	if err != nil {
+		return "", err
+	}
+	fc, ok := g.faces[faceName]
+	if !ok {
+		return "", fmt.Errorf("неизвестная грань: %s", faceName)
+	}
+	cells, opaque := sampleFace(img, isBG, fc, n, ss, inset)
+
+	factor := 1.0
+	if unshade {
+		var means []float64
+		for _, name := range []string{"top", "left", "right"} {
+			c, o := sampleFace(img, isBG, g.faces[name], 8, 2, inset)
+			means = append(means, meanLum(c, o))
+		}
+		max := means[0]
+		for _, m := range means {
+			if m > max {
+				max = m
+			}
+		}
+		my := meanLum(cells, opaque)
+		if my > 0 {
+			factor = max / my
+			if factor > 4 {
+				factor = 4
+			}
+		}
+		for i, ok := range opaque {
+			if !ok {
+				continue
+			}
+			c := cells[i]
+			clamp := func(v int) uint8 {
+				if v > 255 {
+					return 255
+				}
+				return uint8(v)
+			}
+			cells[i] = rgb{
+				clamp(int(float64(c.r)*factor + 0.5)),
+				clamp(int(float64(c.g)*factor + 0.5)),
+				clamp(int(float64(c.b)*factor + 0.5)),
+			}
+		}
+	}
+	if mirror {
+		fl := make([]rgb, len(cells))
+		fo := make([]bool, len(opaque))
+		for v := 0; v < n; v++ {
+			for u := 0; u < n; u++ {
+				fl[v*n+(n-1-u)] = cells[v*n+u]
+				fo[v*n+(n-1-u)] = opaque[v*n+u]
+			}
+		}
+		cells, opaque = fl, fo
+	}
+	adjust(cells, opaque, bright)
+	return renderSVG(cells, opaque, n, n, colors, px), nil
+}
+
 // cubeSVG — тот же вывод, что и в main.go: группы по цветам, rect-пробеги
 func cubeSVG(cells []rgb, opaque []bool, n, colors, px int) string {
 	counts := map[rgb]int{}

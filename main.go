@@ -316,6 +316,88 @@ func process(path string, w, h, colors, px int, nearest bool, bright float64, ou
 	fmt.Fprintf(os.Stderr, "%s -> %s (grid %dx%d, colors %d, bright %.2f)\n", path, out, w, h, len(order), bright)
 }
 
+// renderSVG генерирует SVG-строку из cells/opaque (без записи в файл)
+func renderSVG(cells []rgb, opaque []bool, w, h, colors, px int) string {
+	counts := map[rgb]int{}
+	for i, ok := range opaque {
+		if ok {
+			counts[cells[i]]++
+		}
+	}
+	entries := make([]entry, 0, len(counts))
+	for c, n := range counts {
+		entries = append(entries, entry{c, n})
+	}
+	var pal []rgb
+	if len(entries) <= colors {
+		for _, e := range entries {
+			pal = append(pal, e.c)
+		}
+	} else {
+		pal = quantize(entries, colors)
+	}
+	idx := make([]int, w*h)
+	palCnt := make([]int, len(pal))
+	for i := range idx {
+		idx[i] = -1
+	}
+	for i, ok := range opaque {
+		if !ok {
+			continue
+		}
+		best, bd := 0, 1<<30
+		for j, p := range pal {
+			dr := int(cells[i].r) - int(p.r)
+			dg := int(cells[i].g) - int(p.g)
+			db := int(cells[i].b) - int(p.b)
+			if d := dr*dr + dg*dg + db*db; d < bd {
+				bd, best = d, j
+			}
+		}
+		idx[i] = best
+		palCnt[best]++
+	}
+	order := make([]int, 0, len(pal))
+	for j := range pal {
+		if palCnt[j] > 0 {
+			order = append(order, j)
+		}
+	}
+	sort.Slice(order, func(a, b int) bool { return palCnt[order[a]] > palCnt[order[b]] })
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"%d\" viewBox=\"0 0 %d %d\"\n    shape-rendering=\"crispEdges\">\n",
+		w*px, h*px, w, h)
+	for _, j := range order {
+		p := pal[j]
+		fmt.Fprintf(&sb, "    <!-- #%02x%02x%02x : %d px -->\n", p.r, p.g, p.b, palCnt[j])
+		fmt.Fprintf(&sb, "    <g fill=\"#%02x%02x%02x\">\n", p.r, p.g, p.b)
+		for y := 0; y < h; y++ {
+			x := 0
+			for x < w {
+				if idx[y*w+x] != j {
+					x++
+					continue
+				}
+				x0 := x
+				for x < w && idx[y*w+x] == j {
+					x++
+				}
+				fmt.Fprintf(&sb, "        <rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"1\" />\n", x0, y, x-x0)
+			}
+		}
+		sb.WriteString("    </g>\n")
+	}
+	sb.WriteString("</svg>\n")
+	return sb.String()
+}
+
+func processInMemory(img image.Image, w, h, colors, px int, nearest bool, bright float64) string {
+	cells, opaque := sample(img, w, h, nearest)
+	adjust(cells, opaque, bright)
+	return renderSVG(cells, opaque, w, h, colors, px)
+}
+
 func extOf(p string) string {
 	for i := len(p) - 1; i >= 0; i-- {
 		if p[i] == '.' {
@@ -339,12 +421,16 @@ func main() {
 	flag.Parse()
 
 	args := flag.Args()
+	if len(args) >= 1 && args[0] == "gui" {
+		runGUI()
+		return
+	}
 	if len(args) >= 1 && args[0] == "cube" {
 		runCube(args[1:])
 		return
 	}
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: texgen [flags] image.png ... | texgen cube [flags] render.png")
+		fmt.Fprintln(os.Stderr, "usage: texgen [flags] image.png ... | texgen cube [flags] render.png | texgen gui")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
