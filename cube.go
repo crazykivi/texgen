@@ -12,7 +12,6 @@ import (
 	"strings"
 )
 
-// грань куба в изометрии: точка P(u,v) = O + u*U + v*V, u,v in [0,1]
 type cubeFace struct {
 	O, U, V [2]float64
 }
@@ -22,12 +21,11 @@ type cubeGeom struct {
 	htop, edge, hw float64
 }
 
-// detectCube находит силуэт куба и возвращает грани + функцию "это фон?"
 func detectCube(img image.Image, tol int) (*cubeGeom, func(int, int) bool, error) {
 	b := img.Bounds()
 	cr, cg, cb, ca := img.At(b.Min.X, b.Min.Y).RGBA()
 	cr8, cg8, cb8 := int(cr>>8), int(cg>>8), int(cb>>8)
-	alphaBG := ca < 32768 // угол прозрачный -> фон определяем по альфе
+	alphaBG := ca < 32768
 	isBG := func(x, y int) bool {
 		r, g, bl, a := img.At(x, y).RGBA()
 		if a < 32768 {
@@ -66,7 +64,6 @@ func detectCube(img image.Image, tol int) (*cubeGeom, func(int, int) bool, error
 		return nil, nil, fmt.Errorf("не найден куб на картинке (проверь фон)")
 	}
 
-	// верх и низ левого вертикального ребра
 	ytop, ybot := b.Max.Y, b.Min.Y
 	for x := minx; x <= minx+1 && x <= maxx; x++ {
 		for y := miny; y <= maxy; y++ {
@@ -81,9 +78,9 @@ func detectCube(img image.Image, tol int) (*cubeGeom, func(int, int) bool, error
 		}
 	}
 	g := &cubeGeom{
-		htop: float64(ytop - miny),     // полувысота ромба верхней грани
-		edge: float64(ybot - ytop + 1), // длина вертикального ребра
-		hw:   float64(maxx-minx+1) / 2, // полуширина куба
+		htop: float64(ytop - miny),
+		edge: float64(ybot - ytop + 1),
+		hw:   float64(maxx-minx+1) / 2,
 	}
 	expect := 2*g.htop + g.edge
 	actual := float64(maxy - miny + 1)
@@ -92,8 +89,8 @@ func detectCube(img image.Image, tol int) (*cubeGeom, func(int, int) bool, error
 	}
 
 	cx := float64(minx+maxx) / 2
-	yD := float64(miny) + g.htop   // левый угол ромба
-	yC := float64(miny) + 2*g.htop // передний верхний угол
+	yD := float64(miny) + g.htop
+	yC := float64(miny) + 2*g.htop
 	g.faces = map[string]cubeFace{
 		"top":   {O: [2]float64{float64(minx), yD}, U: [2]float64{g.hw, g.htop}, V: [2]float64{g.hw, -g.htop}},
 		"left":  {O: [2]float64{float64(minx), yD}, U: [2]float64{g.hw, g.htop}, V: [2]float64{0, g.edge}},
@@ -102,7 +99,6 @@ func detectCube(img image.Image, tol int) (*cubeGeom, func(int, int) bool, error
 	return g, isBG, nil
 }
 
-// sampleFace снимает n*n текселей с грани, усредняя ss*ss сэмплов на тексель
 func sampleFace(img image.Image, isBG func(int, int) bool, f cubeFace, n, ss int, inset float64) ([]rgb, []bool) {
 	b := img.Bounds()
 	cells := make([]rgb, n*n)
@@ -161,71 +157,6 @@ func meanLum(cells []rgb, opaque []bool) float64 {
 	return s / float64(n)
 }
 
-func processCubeInMemory(img image.Image, faceName string, n, colors, px, ss int, inset float64, unshade, mirror bool, bright float64, tol int) (string, error) {
-	g, isBG, err := detectCube(img, tol)
-	if err != nil {
-		return "", err
-	}
-	fc, ok := g.faces[faceName]
-	if !ok {
-		return "", fmt.Errorf("неизвестная грань: %s", faceName)
-	}
-	cells, opaque := sampleFace(img, isBG, fc, n, ss, inset)
-
-	factor := 1.0
-	if unshade {
-		var means []float64
-		for _, name := range []string{"top", "left", "right"} {
-			c, o := sampleFace(img, isBG, g.faces[name], 8, 2, inset)
-			means = append(means, meanLum(c, o))
-		}
-		max := means[0]
-		for _, m := range means {
-			if m > max {
-				max = m
-			}
-		}
-		my := meanLum(cells, opaque)
-		if my > 0 {
-			factor = max / my
-			if factor > 4 {
-				factor = 4
-			}
-		}
-		for i, ok := range opaque {
-			if !ok {
-				continue
-			}
-			c := cells[i]
-			clamp := func(v int) uint8 {
-				if v > 255 {
-					return 255
-				}
-				return uint8(v)
-			}
-			cells[i] = rgb{
-				clamp(int(float64(c.r)*factor + 0.5)),
-				clamp(int(float64(c.g)*factor + 0.5)),
-				clamp(int(float64(c.b)*factor + 0.5)),
-			}
-		}
-	}
-	if mirror {
-		fl := make([]rgb, len(cells))
-		fo := make([]bool, len(opaque))
-		for v := 0; v < n; v++ {
-			for u := 0; u < n; u++ {
-				fl[v*n+(n-1-u)] = cells[v*n+u]
-				fo[v*n+(n-1-u)] = opaque[v*n+u]
-			}
-		}
-		cells, opaque = fl, fo
-	}
-	adjust(cells, opaque, bright)
-	return renderSVG(cells, opaque, n, n, colors, px), nil
-}
-
-// cubeSVG — тот же вывод, что и в main.go: группы по цветам, rect-пробеги
 func cubeSVG(cells []rgb, opaque []bool, n, colors, px int) string {
 	counts := map[rgb]int{}
 	for i, ok := range opaque {
@@ -391,6 +322,71 @@ func processCube(path, faceName string, n, colors, px, ss int, inset float64, un
 	fmt.Fprintf(os.Stderr, "%s: грань=%s сетка=%d цветов=%d unshade=x%.2f bright=%.2f -> %s\n", path, faceName, n, colors, factor, bright, out)
 }
 
+func processCubeInMemory(img image.Image, faceName string, n, colors, px, ss int, inset float64, unshade, mirror bool, bright float64, tol int) (string, error) {
+	g, isBG, err := detectCube(img, tol)
+	if err != nil {
+		return "", err
+	}
+	fc, ok := g.faces[faceName]
+	if !ok {
+		return "", fmt.Errorf("неизвестная грань: %s", faceName)
+	}
+	cells, opaque := sampleFace(img, isBG, fc, n, ss, inset)
+
+	if unshade {
+		var means []float64
+		for _, name := range []string{"top", "left", "right"} {
+			c, o := sampleFace(img, isBG, g.faces[name], 8, 2, inset)
+			means = append(means, meanLum(c, o))
+		}
+		max := means[0]
+		for _, m := range means {
+			if m > max {
+				max = m
+			}
+		}
+		my := meanLum(cells, opaque)
+		if my > 0 {
+			factor := max / my
+			if factor > 4 {
+				factor = 4
+			}
+			for i, ok := range opaque {
+				if !ok {
+					continue
+				}
+				c := cells[i]
+				clamp := func(v int) uint8 {
+					if v > 255 {
+						return 255
+					}
+					return uint8(v)
+				}
+				cells[i] = rgb{
+					clamp(int(float64(c.r)*factor + 0.5)),
+					clamp(int(float64(c.g)*factor + 0.5)),
+					clamp(int(float64(c.b)*factor + 0.5)),
+				}
+			}
+		}
+	}
+
+	if mirror {
+		fl := make([]rgb, len(cells))
+		fo := make([]bool, len(opaque))
+		for v := 0; v < n; v++ {
+			for u := 0; u < n; u++ {
+				fl[v*n+(n-1-u)] = cells[v*n+u]
+				fo[v*n+(n-1-u)] = opaque[v*n+u]
+			}
+		}
+		cells, opaque = fl, fo
+	}
+
+	adjust(cells, opaque, bright)
+	return renderSVG(cells, opaque, n, n, colors, px), nil
+}
+
 func runCube(args []string) {
 	fs := flag.NewFlagSet("cube", flag.ExitOnError)
 	faceName := fs.String("face", "right", "грань: top|left|right")
@@ -398,7 +394,7 @@ func runCube(args []string) {
 	colors := fs.Int("colors", 4, "максимум цветов палитры")
 	px := fs.Int("px", 4, "экранный размер пикселя в svg")
 	ss := fs.Int("ss", 4, "сэмплов на тексель (качество усреднения)")
-	inset := fs.Float64("inset", 0.04, "отступ от краёв грани, доля (срезует антиалиасинг)")
+	inset := fs.Float64("inset", 0.04, "отступ от краёв грани, доля (срежает антиалиасинг)")
 	unshade := fs.Bool("unshade", true, "компенсировать затенение грани (выкл: -unshade=false)")
 	mirror := fs.Bool("mirror", false, "отзеркалить текстуру по горизонтали")
 	bright := fs.Float64("bright", 1, "яркость снятой текстуры: <1 темнее, >1 светлее")

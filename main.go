@@ -104,7 +104,6 @@ func split(b box) (box, box, bool) {
 	return box{es: es[:i]}, box{es: es[i:]}, true
 }
 
-// quantize — median cut по взвешенным уникальным цветам сетки
 func quantize(es []entry, k int) []rgb {
 	boxes := []box{{es: es}}
 	for len(boxes) < k {
@@ -132,7 +131,6 @@ func quantize(es []entry, k int) []rgb {
 	return pal
 }
 
-// sample — даунскейл до w*h ячеек: усреднение по площади либо nearest
 func sample(img image.Image, w, h int, nearest bool) ([]rgb, []bool) {
 	b := img.Bounds()
 	sw, sh := b.Dx(), b.Dy()
@@ -181,7 +179,7 @@ func sample(img image.Image, w, h int, nearest bool) ([]rgb, []bool) {
 				}
 			}
 			if n == 0 || sa/n < 32768 {
-				continue // ячейка прозрачная -> rect не пишется
+				continue
 			}
 			cells[y*w+x] = rgb{uint8(sr / n >> 8), uint8(sg / n >> 8), uint8(sb / n >> 8)}
 			opaque[y*w+x] = true
@@ -190,7 +188,6 @@ func sample(img image.Image, w, h int, nearest bool) ([]rgb, []bool) {
 	return cells, opaque
 }
 
-// adjust — яркость: <1 темнее (мультипликативно), >1 светлее (без клипования светов)
 func adjust(cells []rgb, opaque []bool, bright float64) {
 	if bright == 1 {
 		return
@@ -243,11 +240,11 @@ func process(path string, w, h, colors, px int, nearest bool, bright float64, ou
 
 	var pal []rgb
 	if len(entries) <= colors {
-		for _, e := range entries { // цветов мало (пиксель-арт) — берётся, как есть
+		for _, e := range entries {
 			pal = append(pal, e.c)
 		}
 	} else {
-		pal = quantize(entries, colors) // фото — медиан-кат
+		pal = quantize(entries, colors)
 	}
 
 	idx := make([]int, w*h)
@@ -316,7 +313,6 @@ func process(path string, w, h, colors, px int, nearest bool, bright float64, ou
 	fmt.Fprintf(os.Stderr, "%s -> %s (grid %dx%d, colors %d, bright %.2f)\n", path, out, w, h, len(order), bright)
 }
 
-// renderSVG генерирует SVG-строку из cells/opaque (без записи в файл)
 func renderSVG(cells []rgb, opaque []bool, w, h, colors, px int) string {
 	counts := map[rgb]int{}
 	for i, ok := range opaque {
@@ -413,27 +409,29 @@ func extOf(p string) string {
 func main() {
 	w := flag.Int("w", 16, "ширина сетки текстуры")
 	h := flag.Int("h", 16, "высота сетки текстуры")
-	colors := flag.Int("colors", 4, "максимум цветов палитры (квантование фото)")
-	px := flag.Int("px", 4, "размер одного пикселя на экране (width = w*px)")
-	nearest := flag.Bool("nearest", false, "nearest-neighbor вместо усреднения (для пиксель-арта)")
-	bright := flag.Float64("bright", 1, "яркость: <1 темнее (0.6 = -40%), >1 светлее")
+	colors := flag.Int("colors", 4, "максимум цветов палитры")
+	px := flag.Int("px", 4, "размер пикселя на экране (width = w*px)")
+	nearest := flag.Bool("nearest", false, "nearest-neighbor вместо усреднения")
+	bright := flag.Float64("bright", 1, "яркость: <1 темнее, >1 светлее")
 	out := flag.String("out", "", "файл вывода (по умолчанию имя_входа.svg)")
 	flag.Parse()
 
 	args := flag.Args()
-	if len(args) >= 1 && args[0] == "gui" {
-		runGUI()
-		return
-	}
+
 	if len(args) >= 1 && args[0] == "cube" {
 		runCube(args[1:])
 		return
 	}
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: texgen [flags] image.png ... | texgen cube [flags] render.png | texgen gui")
-		flag.PrintDefaults()
-		os.Exit(1)
+	if len(args) >= 1 && args[0] == "gui" {
+		runGUI()
+		return
 	}
+
+	if len(args) < 1 {
+		runGUI()
+		return
+	}
+
 	for _, p := range args {
 		process(p, *w, *h, *colors, *px, *nearest, *bright, *out)
 	}
