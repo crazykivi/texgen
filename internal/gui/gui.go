@@ -1,14 +1,7 @@
-package main
+package gui
 
 import (
-	"encoding/json"
 	"fmt"
-	"image"
-	"image/color"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,104 +9,17 @@ import (
 	"sync"
 	"time"
 
+	"texgen/internal/cli"
+	"texgen/internal/imageproc"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/storage"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
-
-type cyrillicTheme struct{}
-
-var cyrillicFont fyne.Resource
-
-func initCyrillicFont() {
-	candidates := []string{
-		`C:\Windows\Fonts\segoeui.ttf`,
-		`C:\Windows\Fonts\arial.ttf`,
-		`C:\Windows\Fonts\calibri.ttf`,
-	}
-	for _, p := range candidates {
-		if data, err := os.ReadFile(p); err == nil {
-			cyrillicFont = fyne.NewStaticResource(filepath.Base(p), data)
-			return
-		}
-	}
-	cyrillicFont = nil
-}
-
-func (cyrillicTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
-	return theme.DefaultTheme().Color(n, v)
-}
-func (cyrillicTheme) Font(_ fyne.TextStyle) fyne.Resource {
-	if cyrillicFont != nil {
-		return cyrillicFont
-	}
-	return theme.DefaultTheme().Font(fyne.TextStyle{})
-}
-func (cyrillicTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
-	return theme.DefaultTheme().Icon(n)
-}
-func (cyrillicTheme) Size(n fyne.ThemeSizeName) float32 {
-	return theme.DefaultTheme().Size(n)
-}
-
-type preset struct {
-	Name    string  `json:"name"`
-	Mode    string  `json:"mode"`
-	W       int     `json:"w"`
-	H       int     `json:"h"`
-	Colors  int     `json:"colors"`
-	Px      int     `json:"px"`
-	Nearest bool    `json:"nearest"`
-	Bright  float64 `json:"bright"`
-	Face    string  `json:"face"`
-	Size    int     `json:"size"`
-	SS      int     `json:"ss"`
-	Inset   float64 `json:"inset"`
-	Unshade bool    `json:"unshade"`
-	Mirror  bool    `json:"mirror"`
-	Tol     int     `json:"tol"`
-}
-
-func presetsPath() string {
-	cwd, _ := os.Getwd()
-	if cwd != "" {
-		if _, err := os.Stat(filepath.Join(cwd, "go.mod")); err == nil {
-			return filepath.Join(cwd, "presets.json")
-		}
-	}
-	exe, err := os.Executable()
-	if err == nil {
-		return filepath.Join(filepath.Dir(exe), "presets.json")
-	}
-	return filepath.Join(cwd, "presets.json")
-}
-
-func loadPresets() []preset {
-	b, err := os.ReadFile(presetsPath())
-	if err != nil {
-		return nil
-	}
-	var ps []preset
-	_ = json.Unmarshal(b, &ps)
-	out := make([]preset, 0, len(ps))
-	for _, p := range ps {
-		if strings.TrimSpace(p.Name) == "" {
-			continue
-		}
-		out = append(out, p)
-	}
-	return out
-}
-
-func savePresets(ps []preset) {
-	b, _ := json.MarshalIndent(ps, "", "  ")
-	_ = os.WriteFile(presetsPath(), b, 0644)
-}
 
 func readInt(e *widget.Entry, def int) int {
 	n, err := strconv.Atoi(strings.TrimSpace(e.Text))
@@ -147,15 +53,10 @@ func setPreview(img *canvas.Image, svg string) {
 }
 
 func uriPath(u fyne.URI) string {
-	s := u.String()
-	s = strings.TrimPrefix(s, "file://")
-	if dec, err := url.PathUnescape(s); err == nil {
-		s = dec
+	if u == nil {
+		return ""
 	}
-	if len(s) >= 3 && (s[0] == '/' || s[0] == '\\') && s[2] == ':' {
-		s = s[1:]
-	}
-	return filepath.FromSlash(s)
+	return u.Path()
 }
 
 func ensureExt(path string) string {
@@ -241,7 +142,7 @@ func (d *debouncer) call(delay time.Duration, f func()) {
 	d.timer = time.AfterFunc(delay, f)
 }
 
-func runGUI() {
+func RunGUI() {
 	initCyrillicFont()
 
 	a := app.NewWithID("ru.texgen.svggen")
@@ -281,25 +182,29 @@ func runGUI() {
 		if src == "" {
 			return
 		}
+
 		fyne.Do(func() {
 			fLog.SetText("обработка...")
 			flatActivity.Show()
 			flatActivity.Start()
 		})
-		img, err := loadImg(src)
+
+		time.Sleep(30 * time.Millisecond)
+
+		img, err := imageproc.LoadImg(src)
 		if err != nil {
 			fyne.Do(func() {
 				flatActivity.Stop()
 				flatActivity.Hide()
-				fLog.SetText("файл не читается: " + err.Error())
+				fLog.SetText("Файл не читается: " + err.Error())
 			})
 			return
 		}
-		svg := processInMemory(img, readInt(fWEntry, 16), readInt(fHEntry, 16),
+		svgStr := cli.ProcessFlatInMemory(img, readInt(fWEntry, 16), readInt(fHEntry, 16),
 			readInt(fColorsEntry, 4), readInt(fPxEntry, 4),
 			fNearest.Checked, readFloat(fBrightEntry, 1))
 		fyne.Do(func() {
-			setPreview(fPreview, svg)
+			setPreview(fPreview, svgStr)
 			fLog.SetText(fmt.Sprintf("готово: %dx%d, цветов=%d, bright=%.2f",
 				readInt(fWEntry, 16), readInt(fHEntry, 16), readInt(fColorsEntry, 4), readFloat(fBrightEntry, 1)))
 			flatActivity.Stop()
@@ -326,15 +231,15 @@ func runGUI() {
 			fLog.SetText("выбери файл")
 			return
 		}
-		img, err := loadImg(src)
+		img, err := imageproc.LoadImg(src)
 		if err != nil {
 			fLog.SetText("ошибка: " + err.Error())
 			return
 		}
-		svg := processInMemory(img, readInt(fWEntry, 16), readInt(fHEntry, 16),
+		svgStr := cli.ProcessFlatInMemory(img, readInt(fWEntry, 16), readInt(fHEntry, 16),
 			readInt(fColorsEntry, 4), readInt(fPxEntry, 4),
 			fNearest.Checked, readFloat(fBrightEntry, 1))
-		saveToFile(w, svg, func(path string) { fLog.SetText("сохранено: " + path) })
+		saveToFile(w, svgStr, func(path string) { fLog.SetText("сохранено: " + path) })
 	})
 
 	fWEntry.OnChanged = func(string) { scheduleFlat() }
@@ -370,7 +275,7 @@ func runGUI() {
 	cTolEntry, cTolBox := newSpinBox(12, 1, 0, 255)
 	cBrightEntry, cBrightBox := newFloatSpinBox(1.0, 0.05, 0.0, 5.0)
 
-	cUnshade := widget.NewCheck("компенсировать затенение", nil)
+	cUnshade := widget.NewCheck("компенсировать затемнение", nil)
 	cUnshade.Checked = true
 	cMirror := widget.NewCheck("зеркалить по горизонтали", nil)
 	cSrc := widget.NewEntry()
@@ -385,21 +290,25 @@ func runGUI() {
 		if src == "" {
 			return
 		}
+
 		fyne.Do(func() {
 			cLog.SetText("обработка...")
 			cubeActivity.Show()
 			cubeActivity.Start()
 		})
-		img, err := loadImg(src)
+
+		time.Sleep(30 * time.Millisecond)
+
+		img, err := imageproc.LoadImg(src)
 		if err != nil {
 			fyne.Do(func() {
 				cubeActivity.Stop()
 				cubeActivity.Hide()
-				cLog.SetText("файл не читается: " + err.Error())
+				cLog.SetText("Файл не читается: " + err.Error())
 			})
 			return
 		}
-		svg, err := processCubeInMemory(img, cFace.Selected,
+		svgStr, err := cli.ProcessCubeInMemory(img, cFace.Selected,
 			readInt(cSizeEntry, 16), readInt(cColorsEntry, 4), readInt(cPxEntry, 4), readInt(cSSEntry, 4),
 			readFloat(cInsetEntry, 0.04), cUnshade.Checked, cMirror.Checked,
 			readFloat(cBrightEntry, 1), readInt(cTolEntry, 12))
@@ -412,7 +321,7 @@ func runGUI() {
 			return
 		}
 		fyne.Do(func() {
-			setPreview(cPreview, svg)
+			setPreview(cPreview, svgStr)
 			cLog.SetText(fmt.Sprintf("готово: грань=%s, цветов=%d, bright=%.2f",
 				cFace.Selected, readInt(cColorsEntry, 4), readFloat(cBrightEntry, 1)))
 			cubeActivity.Stop()
@@ -439,12 +348,12 @@ func runGUI() {
 			cLog.SetText("выбери файл")
 			return
 		}
-		img, err := loadImg(src)
+		img, err := imageproc.LoadImg(src)
 		if err != nil {
 			cLog.SetText("ошибка: " + err.Error())
 			return
 		}
-		svg, err := processCubeInMemory(img, cFace.Selected,
+		svgStr, err := cli.ProcessCubeInMemory(img, cFace.Selected,
 			readInt(cSizeEntry, 16), readInt(cColorsEntry, 4), readInt(cPxEntry, 4), readInt(cSSEntry, 4),
 			readFloat(cInsetEntry, 0.04), cUnshade.Checked, cMirror.Checked,
 			readFloat(cBrightEntry, 1), readInt(cTolEntry, 12))
@@ -452,7 +361,7 @@ func runGUI() {
 			cLog.SetText("ошибка: " + err.Error())
 			return
 		}
-		saveToFile(w, svg, func(path string) { cLog.SetText("сохранено: " + path) })
+		saveToFile(w, svgStr, func(path string) { cLog.SetText("сохранено: " + path) })
 	})
 
 	cFace.OnChanged = func(string) { scheduleCube() }
@@ -487,10 +396,10 @@ func runGUI() {
 
 	selectedPresetID := -1
 	presetList := widget.NewList(
-		func() int { return len(loadPresets()) },
+		func() int { return len(LoadPresets()) },
 		func() fyne.CanvasObject { return widget.NewLabel("preset template") },
 		func(i widget.ListItemID, o fyne.CanvasObject) {
-			ps := loadPresets()
+			ps := LoadPresets()
 			if i >= len(ps) {
 				return
 			}
@@ -499,7 +408,7 @@ func runGUI() {
 	)
 
 	applyPreset := func(id int) {
-		ps := loadPresets()
+		ps := LoadPresets()
 		if id < 0 || id >= len(ps) {
 			return
 		}
@@ -514,7 +423,7 @@ func runGUI() {
 			if selectTab != nil {
 				selectTab("flat")
 			}
-			go refreshFlat()
+			scheduleFlat()
 		} else {
 			cFace.SetSelected(p.Face)
 			cSizeEntry.SetText(fmt.Sprint(p.Size))
@@ -529,7 +438,7 @@ func runGUI() {
 			if selectTab != nil {
 				selectTab("cube")
 			}
-			go refreshCube()
+			scheduleCube()
 		}
 	}
 
@@ -550,13 +459,13 @@ func runGUI() {
 			if strings.TrimSpace(name) == "" {
 				return
 			}
-			ps := loadPresets()
-			ps = append(ps, preset{
+			ps := LoadPresets()
+			ps = append(ps, Preset{
 				Name: name, Mode: "flat",
 				W: readInt(fWEntry, 16), H: readInt(fHEntry, 16), Colors: readInt(fColorsEntry, 4),
 				Px: readInt(fPxEntry, 4), Nearest: fNearest.Checked, Bright: readFloat(fBrightEntry, 1),
 			})
-			savePresets(ps)
+			SavePresets(ps)
 			presetRefresh()
 		}, w)
 	})
@@ -565,15 +474,15 @@ func runGUI() {
 			if strings.TrimSpace(name) == "" {
 				return
 			}
-			ps := loadPresets()
-			ps = append(ps, preset{
+			ps := LoadPresets()
+			ps = append(ps, Preset{
 				Name: name, Mode: "cube", Face: cFace.Selected,
 				Size: readInt(cSizeEntry, 16), Colors: readInt(cColorsEntry, 4), Px: readInt(cPxEntry, 4),
 				SS: readInt(cSSEntry, 4), Inset: readFloat(cInsetEntry, 0.04),
 				Bright: readFloat(cBrightEntry, 1), Tol: readInt(cTolEntry, 12),
 				Unshade: cUnshade.Checked, Mirror: cMirror.Checked,
 			})
-			savePresets(ps)
+			SavePresets(ps)
 			presetRefresh()
 		}, w)
 	})
@@ -581,15 +490,15 @@ func runGUI() {
 		if selectedPresetID < 0 {
 			return
 		}
-		ps := loadPresets()
+		ps := LoadPresets()
 		ps = append(ps[:selectedPresetID], ps[selectedPresetID+1:]...)
-		savePresets(ps)
+		SavePresets(ps)
 		selectedPresetID = -1
 		presetRefresh()
 	})
 
 	presetPanel := container.NewBorder(
-		container.NewPadded(widget.NewLabel("Пресеты хранятся в: "+presetsPath())),
+		container.NewPadded(widget.NewLabel("Пресеты хранятся в: "+PresetsPath())),
 		container.NewPadded(container.NewHBox(applyBtn, savePresetBtn, saveCubePresetBtn, delPresetBtn)),
 		nil, nil,
 		presetList,
@@ -625,14 +534,4 @@ func runGUI() {
 
 	w.SetContent(tabs)
 	w.ShowAndRun()
-}
-
-func loadImg(path string) (image.Image, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	img, _, err := image.Decode(f)
-	return img, err
 }
