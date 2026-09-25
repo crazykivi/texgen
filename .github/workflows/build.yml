@@ -5,14 +5,14 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Go
@@ -20,7 +20,7 @@ jobs:
         with:
           go-version: "1.22"
 
-      - name: Setup MinGW-w64
+      - name: Setup MinGW-w64 (MSYS2)
         uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
@@ -31,19 +31,25 @@ jobs:
         shell: pwsh
         run: echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      - name: Verify CGO enabled
+      - name: Verify toolchain
+        shell: bash
         run: |
-          go env CGO_ENABLED
           gcc --version
+          go env CGO_ENABLED
+          go version
 
-      - name: Download dependencies
+      - name: Download modules
         run: go mod download
 
-      - name: Build executable
+      - name: Build GUI executable (no console window)
         shell: bash
         env:
           CGO_ENABLED: 1
         run: go build -ldflags="-H=windowsgui -s -w" -o texgen.exe .
+
+      - name: Smoke test (help output via -h)
+        shell: bash
+        run: ./texgen.exe cube -h
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
